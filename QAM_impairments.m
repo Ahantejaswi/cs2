@@ -1,49 +1,44 @@
-% Parameters
-M = 16; % QAM order (16-QAM)
-numSymbols = 1e5; % Number of symbols per SNR point
-SNRdB = 0:2:20; % SNR range in dB
-EbNo = SNRdB - 10*log10(log2(M)); % Convert SNR to Eb/No
-numSNR = length(SNRdB);
-SER = zeros(1, numSNR); % Initialize SER array
-% Receiver impairments
-gainImbalance = 0.1; % Gain imbalance
-phaseMismatch = 0.05; % Phase mismatch in radians
-dcOffsetI = 0.05; % DC offset in I component
-dcOffsetQ = 0.05; % DC offset in Q component
-for k = 1:numSNR
-    % Generate random data symbols
-    dataSymbols = randi([0 M-1], numSymbols, 1);
-    % QAM modulation
-    modulatedSignal = qammod(dataSymbols, M, 'UnitAveragePower', true);
-    % Apply gain imbalance
-    I = real(modulatedSignal);
-    Q = imag(modulatedSignal);
-    receivedSignal = (1 + gainImbalance) * I + 1i * (1 - gainImbalance) * Q;
-    % Apply phase mismatch
-    receivedSignal = receivedSignal .* exp(1i * phaseMismatch);
-    % Apply DC offsets
-    receivedSignal = receivedSignal + dcOffsetI + 1i * dcOffsetQ;
-    % Add AWGN
-    receivedSignal = awgn(receivedSignal, SNRdB(k), 'measured');
-    % QAM demodulation
-    demodulatedSymbols = qamdemod(receivedSignal, M, 'UnitAveragePower', true);
-    % Calculate SER
-    SER(k) = sum(dataSymbols ~= demodulatedSymbols) / numSymbols;
+clear all; clc;
+N = 100000; 
+EbN0dB = -4:2:20; 
+M = 64; 
+g = 0.9; phi = 8; dc_i = 1.9; dc_q = 1.7; 
+
+k = log2(M); 
+EsN0dB = 10 * log10(k) + EbN0dB; 
+SER1 = zeros(1, length(EsN0dB)); 
+SER2 = SER1; 
+SER3 = SER1; 
+
+d = ceil(M .* rand(1, N)); 
+[s, ref] = mqam_modulator(M, d); 
+
+for i = 1:length(EsN0dB)
+    r = add_awgn_noise(s, EsN0dB(i));
+    z = receiver_impairments(r, g, phi, dc_i, dc_q); 
+    v = dc_compensation(z); 
+    y3 = blind_iq_compensation(v); 
+
+    [estTxSymbols_1, dcap_1] = iqOptDetector(z, ref); 
+    [estTxSymbols_2, dcap_2] = iqOptDetector(v, ref); 
+    [estTxSymbols_3, dcap_3] = iqOptDetector(y3, ref); 
+
+    SER1(i) = sum(d ~= dcap_1) / N; 
+    SER2(i) = sum(d ~= dcap_2) / N;
+    SER3(i) = sum(d ~= dcap_3) / N; 
 end
-% Plot SER vs Eb/No
-figure;
-semilogy(EbNo, SER, 'b-o');
-xlabel('E_b/N_0 (dB)');
-ylabel('Symbol Error Rate (SER)');
-title('SER vs E_b/N_0 for 16-QAM with Receiver Impairments');
-grid on;
-% Display results for each SNR point
-fprintf('SNR (dB)    SER\n');
-fprintf('--------    ---\n');
-for k = 1:numSNR
-    fprintf('%8.2f    %e\n', SNRdB(k), SER(k));
-end
-% Optional: Plot constellation diagram for the highest SNR point
-scatterplot(receivedSignal);
-title('Received Signal Constellation with Receiver Impairments (SNR = 20 dB)');
+
+theoreticalSER = ser_awgn(EbN0dB, 'MQAM', M); 
+
+figure(2); 
+
+semilogy(EbN0dB, SER1, 'r*-');
+hold on;
+semilogy(EbN0dB, SER2, 'bO-'); 
+semilogy(EbN0dB, SER3, 'g^-');
+semilogy(EbN0dB, theoreticalSER, 'k');
+
+xlabel('E_b/N_0 (dB)'); ylabel('Symbol Error Rate (Ps)');
+title('Probability of Symbol Error 64-QAM signals');
+scatterplot(r)
 grid on;
